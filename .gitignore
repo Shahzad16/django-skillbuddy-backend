@@ -179,6 +179,10 @@ static/
 **/migrations/*
 !**/migrations/__init__.py
 
+# Documentation files
+*.md
+!README.md
+
 # Logs
 logs/
 *.log
