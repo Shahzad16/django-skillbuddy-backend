@@ -52,9 +52,11 @@ INSTALLED_APPS = [
     'storages',
     'drf_spectacular',
     'django_extensions',
+    'django_filters',
 
     # Local apps
     'accounts',
+    'services',
 ]
 
 MIDDLEWARE = [
