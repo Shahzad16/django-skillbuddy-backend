@@ -2,9 +2,10 @@ from rest_framework import generics, status, permissions, filters
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
-from django.db.models import Q, Sum
+from django.db.models import Q, Sum, Count, Avg
 from django.utils import timezone
 from datetime import timedelta
+from math import radians, cos, sin, asin, sqrt
 from .models import (
     ServiceCategory, ProviderProfile, Service, Booking, Review,
     Payment, Installment, UserCredits, Address
@@ -504,3 +505,309 @@ class AddressDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return Address.objects.filter(user=self.request.user)
+
+
+# Provider Earnings & Analytics
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def provider_earnings_view(request):
+    """Get detailed provider earnings breakdown"""
+    try:
+        profile = request.user.provider_profile
+
+        # Filter by date range if provided
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+
+        bookings = Booking.objects.filter(
+            provider=request.user,
+            status='completed',
+            is_paid=True
+        )
+
+        if start_date:
+            bookings = bookings.filter(created_at__gte=start_date)
+        if end_date:
+            bookings = bookings.filter(created_at__lte=end_date)
+
+        total_earnings = bookings.aggregate(total=Sum('total_amount'))['total'] or 0
+
+        # Group by month
+        from django.db.models.functions import TruncMonth
+        monthly_earnings = bookings.annotate(
+            month=TruncMonth('created_at')
+        ).values('month').annotate(
+            amount=Sum('total_amount'),
+            count=Count('id')
+        ).order_by('-month')[:12]
+
+        return Response({
+            'total_earnings': profile.total_earnings,
+            'period_earnings': total_earnings,
+            'monthly_breakdown': list(monthly_earnings),
+            'completed_jobs': bookings.count(),
+            'average_per_job': total_earnings / bookings.count() if bookings.count() > 0 else 0
+        })
+
+    except ProviderProfile.DoesNotExist:
+        return Response({'error': 'Provider profile not found'},
+                       status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def provider_analytics_view(request):
+    """Get provider performance analytics"""
+    try:
+        profile = request.user.provider_profile
+
+        # Booking statistics
+        total_bookings = Booking.objects.filter(provider=request.user).count()
+        completed_bookings = Booking.objects.filter(provider=request.user, status='completed').count()
+        cancelled_bookings = Booking.objects.filter(provider=request.user, status='cancelled').count()
+
+        # Rating analysis
+        reviews = Review.objects.filter(provider=request.user)
+        rating_breakdown = reviews.values('rating').annotate(count=Count('id'))
+
+        # Service performance
+        top_services = Service.objects.filter(provider=request.user).annotate(
+            booking_count=Count('bookings')
+        ).order_by('-booking_count')[:5]
+
+        return Response({
+            'overview': {
+                'rating': float(profile.rating),
+                'total_earnings': float(profile.total_earnings),
+                'jobs_completed': profile.jobs_completed,
+                'total_bookings': total_bookings,
+                'completion_rate': (completed_bookings / total_bookings * 100) if total_bookings > 0 else 0,
+                'cancellation_rate': (cancelled_bookings / total_bookings * 100) if total_bookings > 0 else 0
+            },
+            'rating_breakdown': list(rating_breakdown),
+            'top_services': ServiceListSerializer(top_services, many=True).data,
+            'total_reviews': reviews.count()
+        })
+
+    except ProviderProfile.DoesNotExist:
+        return Response({'error': 'Provider profile not found'},
+                       status=status.HTTP_404_NOT_FOUND)
+
+
+# Provider Schedule Management
+@api_view(['GET', 'PUT'])
+@permission_classes([permissions.IsAuthenticated])
+def provider_schedule_view(request):
+    """Get or update provider's availability schedule"""
+    try:
+        profile = request.user.provider_profile
+
+        if request.method == 'GET':
+            # Return schedule (for now, just availability status)
+            return Response({
+                'is_available': profile.is_available,
+                'schedule': {}  # TODO: Implement detailed schedule with time slots
+            })
+
+        elif request.method == 'PUT':
+            is_available = request.data.get('is_available')
+            if is_available is not None:
+                profile.is_available = is_available
+                profile.save()
+
+            return Response({
+                'is_available': profile.is_available,
+                'message': 'Schedule updated successfully'
+            })
+
+    except ProviderProfile.DoesNotExist:
+        return Response({'error': 'Provider profile not found'},
+                       status=status.HTTP_404_NOT_FOUND)
+
+
+# Location-based Services
+def haversine_distance(lon1, lat1, lon2, lat2):
+    """Calculate distance between two points in km"""
+    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a))
+    km = 6371 * c
+    return km
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def nearby_services_view(request):
+    """Get services near a location"""
+    latitude = request.query_params.get('latitude')
+    longitude = request.query_params.get('longitude')
+    radius = float(request.query_params.get('radius', 10))  # Default 10km
+
+    if not latitude or not longitude:
+        return Response({'error': 'Latitude and longitude are required'},
+                       status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        lat = float(latitude)
+        lon = float(longitude)
+
+        # Get all active services
+        services = Service.objects.filter(is_active=True).select_related('provider', 'category')
+
+        # Filter by distance (simplified - in production use PostGIS)
+        nearby_services = []
+        for service in services:
+            # Get provider's default address
+            provider_address = Address.objects.filter(
+                user=service.provider,
+                is_default=True
+            ).first()
+
+            if provider_address and provider_address.latitude and provider_address.longitude:
+                distance = haversine_distance(
+                    lon, lat,
+                    float(provider_address.longitude),
+                    float(provider_address.latitude)
+                )
+
+                if distance <= radius:
+                    nearby_services.append({
+                        'service': ServiceListSerializer(service).data,
+                        'distance_km': round(distance, 2)
+                    })
+
+        # Sort by distance
+        nearby_services.sort(key=lambda x: x['distance_km'])
+
+        return Response({
+            'count': len(nearby_services),
+            'results': nearby_services
+        })
+
+    except ValueError:
+        return Response({'error': 'Invalid coordinates'},
+                       status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def geocode_location_view(request):
+    """Convert address to coordinates (placeholder - integrate with Google Maps API)"""
+    address = request.data.get('address')
+
+    if not address:
+        return Response({'error': 'Address is required'},
+                       status=status.HTTP_400_BAD_REQUEST)
+
+    # TODO: Integrate with geocoding service (Google Maps, Mapbox, etc.)
+    return Response({
+        'address': address,
+        'latitude': None,
+        'longitude': None,
+        'message': 'Geocoding service not yet integrated'
+    })
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def validate_address_view(request):
+    """Validate address format"""
+    street_address = request.data.get('street_address')
+    city = request.data.get('city')
+    postal_code = request.data.get('postal_code')
+    country = request.data.get('country')
+
+    errors = []
+    if not street_address:
+        errors.append('Street address is required')
+    if not city:
+        errors.append('City is required')
+    if not postal_code:
+        errors.append('Postal code is required')
+    if not country:
+        errors.append('Country is required')
+
+    if errors:
+        return Response({'valid': False, 'errors': errors},
+                       status=status.HTTP_400_BAD_REQUEST)
+
+    return Response({
+        'valid': True,
+        'message': 'Address is valid'
+    })
+
+
+# Review Management
+@api_view(['PUT'])
+@permission_classes([permissions.IsAuthenticated])
+def respond_to_review_view(request, review_id):
+    """Provider responds to a review"""
+    try:
+        review = Review.objects.get(id=review_id, provider=request.user)
+        provider_response = request.data.get('provider_response')
+
+        if not provider_response:
+            return Response({'error': 'Response text is required'},
+                          status=status.HTTP_400_BAD_REQUEST)
+
+        review.provider_response = provider_response
+        review.save()
+
+        serializer = ReviewSerializer(review)
+        return Response(serializer.data)
+
+    except Review.DoesNotExist:
+        return Response({'error': 'Review not found'},
+                       status=status.HTTP_404_NOT_FOUND)
+
+
+# Payment Management
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def payment_methods_view(request):
+    """Get user's saved payment methods (placeholder)"""
+    # TODO: Integrate with Stripe/PayPal to get saved payment methods
+    return Response({
+        'payment_methods': [],
+        'message': 'Payment gateway integration pending'
+    })
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def refund_payment_view(request):
+    """Process payment refund"""
+    payment_id = request.data.get('payment_id')
+    reason = request.data.get('reason', '')
+
+    try:
+        payment = Payment.objects.get(id=payment_id, user=request.user)
+
+        if payment.status == 'refunded':
+            return Response({'error': 'Payment already refunded'},
+                          status=status.HTTP_400_BAD_REQUEST)
+
+        if payment.status != 'completed':
+            return Response({'error': 'Only completed payments can be refunded'},
+                          status=status.HTTP_400_BAD_REQUEST)
+
+        # TODO: Process refund through payment gateway
+
+        payment.status = 'refunded'
+        payment.save()
+
+        # Update booking status
+        payment.booking.status = 'cancelled'
+        payment.booking.save()
+
+        serializer = PaymentSerializer(payment)
+        return Response({
+            'payment': serializer.data,
+            'message': 'Refund processed successfully'
+        })
+
+    except Payment.DoesNotExist:
+        return Response({'error': 'Payment not found'},
+                       status=status.HTTP_404_NOT_FOUND)

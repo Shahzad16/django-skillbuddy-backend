@@ -18,6 +18,9 @@ urlpatterns = [
     path('providers/register/', views.become_provider_view, name='become-provider'),
     path('providers/profile/', views.ProviderProfileView.as_view(), name='provider-profile'),
     path('providers/dashboard/', views.provider_dashboard_view, name='provider-dashboard'),
+    path('providers/earnings/', views.provider_earnings_view, name='provider-earnings'),
+    path('providers/analytics/', views.provider_analytics_view, name='provider-analytics'),
+    path('providers/schedule/', views.provider_schedule_view, name='provider-schedule'),
     path('providers/jobs/', views.provider_jobs_view, name='provider-jobs'),
     path('providers/jobs/<int:booking_id>/accept/', views.accept_job_view, name='accept-job'),
     path('providers/jobs/<int:booking_id>/decline/', views.decline_job_view, name='decline-job'),
@@ -31,10 +34,13 @@ urlpatterns = [
 
     # Reviews
     path('reviews/', views.ReviewListCreateView.as_view(), name='review-list-create'),
+    path('reviews/<int:review_id>/respond/', views.respond_to_review_view, name='review-respond'),
 
     # Payments
     path('payments/', views.PaymentListView.as_view(), name='payment-list'),
     path('payments/process/', views.process_payment_view, name='payment-process'),
+    path('payments/methods/', views.payment_methods_view, name='payment-methods'),
+    path('payments/refund/', views.refund_payment_view, name='payment-refund'),
 
     # Credits
     path('credits/balance/', views.user_credits_balance_view, name='credits-balance'),
@@ -43,4 +49,9 @@ urlpatterns = [
     # Addresses
     path('addresses/', views.AddressListCreateView.as_view(), name='address-list-create'),
     path('addresses/<int:pk>/', views.AddressDetailView.as_view(), name='address-detail'),
+
+    # Location Services
+    path('nearby/', views.nearby_services_view, name='nearby-services'),
+    path('location/geocode/', views.geocode_location_view, name='geocode-location'),
+    path('location/validate/', views.validate_address_view, name='validate-address'),
 ]
