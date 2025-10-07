@@ -262,3 +262,78 @@ class Address(models.Model):
 
     def __str__(self):
         return f"{self.address_type} - {self.street_address}, {self.city}"
+
+
+class Conversation(models.Model):
+    """Chat conversation between customer and provider"""
+    customer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='customer_conversations')
+    provider = models.ForeignKey(User, on_delete=models.CASCADE, related_name='provider_conversations')
+    booking = models.ForeignKey(Booking, on_delete=models.SET_NULL, null=True, blank=True, related_name='conversations')
+    last_message_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-last_message_at']
+        unique_together = ['customer', 'provider', 'booking']
+
+    def __str__(self):
+        return f"Conversation between {self.customer.name} and {self.provider.name}"
+
+
+class Message(models.Model):
+    """Individual messages in a conversation"""
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name='messages')
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_messages')
+    content = models.TextField()
+    media_url = models.URLField(blank=True, help_text="URL for image/video attachments")
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"Message from {self.sender.name} at {self.created_at}"
+
+
+class Notification(models.Model):
+    """System notifications for users"""
+    NOTIFICATION_TYPE = [
+        ('booking', 'Booking'),
+        ('payment', 'Payment'),
+        ('review', 'Review'),
+        ('message', 'Message'),
+        ('system', 'System'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    notification_type = models.CharField(max_length=20, choices=NOTIFICATION_TYPE)
+    title = models.CharField(max_length=200)
+    message = models.TextField()
+    booking = models.ForeignKey(Booking, on_delete=models.SET_NULL, null=True, blank=True)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.notification_type} notification for {self.user.name}"
+
+
+class NotificationPreference(models.Model):
+    """User notification preferences"""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='notification_preferences')
+    email_notifications = models.BooleanField(default=True)
+    sms_notifications = models.BooleanField(default=False)
+    push_notifications = models.BooleanField(default=True)
+    booking_updates = models.BooleanField(default=True)
+    payment_updates = models.BooleanField(default=True)
+    new_messages = models.BooleanField(default=True)
+    marketing_emails = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Notification preferences for {self.user.name}"

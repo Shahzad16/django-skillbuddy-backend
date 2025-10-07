@@ -34,6 +34,7 @@ urlpatterns = [
 
     # Reviews
     path('reviews/', views.ReviewListCreateView.as_view(), name='review-list-create'),
+    path('bookings/<int:booking_id>/review/', views.create_booking_review_view, name='create-booking-review'),
     path('reviews/<int:review_id>/respond/', views.respond_to_review_view, name='review-respond'),
 
     # Payments
@@ -54,4 +55,19 @@ urlpatterns = [
     path('nearby/', views.nearby_services_view, name='nearby-services'),
     path('location/geocode/', views.geocode_location_view, name='geocode-location'),
     path('location/validate/', views.validate_address_view, name='validate-address'),
+
+    # Chat & Messaging
+    path('chat/conversations/', views.ConversationListCreateView.as_view(), name='conversation-list-create'),
+    path('chat/conversations/<int:pk>/', views.ConversationDetailView.as_view(), name='conversation-detail'),
+    path('chat/messages/', views.MessageListCreateView.as_view(), name='message-list-create'),
+    path('chat/conversations/<int:conversation_id>/mark-read/', views.mark_messages_read_view, name='mark-messages-read'),
+
+    # Notifications
+    path('notifications/', views.NotificationListView.as_view(), name='notification-list'),
+    path('notifications/<int:notification_id>/read/', views.mark_notification_read_view, name='mark-notification-read'),
+    path('notifications/read-all/', views.mark_all_notifications_read_view, name='mark-all-notifications-read'),
+    path('notifications/<int:notification_id>/delete/', views.delete_notification_view, name='delete-notification'),
+    path('notifications/count/', views.notification_count_view, name='notification-count'),
+    path('notifications/preferences/', views.NotificationPreferenceView.as_view(), name='notification-preferences'),
+    path('notifications/send/', views.send_notification_view, name='send-notification'),
 ]

@@ -2,7 +2,8 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import (
     ServiceCategory, ProviderProfile, Service, ServiceImage,
-    Booking, Review, Payment, Installment, UserCredits, Address
+    Booking, Review, Payment, Installment, UserCredits, Address,
+    Conversation, Message, Notification, NotificationPreference
 )
 
 User = get_user_model()
@@ -274,3 +275,57 @@ class AddressSerializer(serializers.ModelSerializer):
             Address.objects.filter(user=instance.user, is_default=True).exclude(id=instance.id).update(is_default=False)
 
         return super().update(instance, validated_data)
+
+
+class MessageSerializer(serializers.ModelSerializer):
+    sender_name = serializers.CharField(source='sender.name', read_only=True)
+    sender_profile_image = serializers.CharField(source='sender.profile_image_url', read_only=True)
+
+    class Meta:
+        model = Message
+        fields = ['id', 'conversation', 'sender', 'sender_name', 'sender_profile_image',
+                 'content', 'media_url', 'is_read', 'created_at']
+        read_only_fields = ['sender', 'created_at']
+
+
+class ConversationSerializer(serializers.ModelSerializer):
+    customer_name = serializers.CharField(source='customer.name', read_only=True)
+    provider_name = serializers.CharField(source='provider.name', read_only=True)
+    customer_profile_image = serializers.CharField(source='customer.profile_image_url', read_only=True)
+    provider_profile_image = serializers.CharField(source='provider.profile_image_url', read_only=True)
+    last_message = serializers.SerializerMethodField()
+    unread_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Conversation
+        fields = ['id', 'customer', 'provider', 'customer_name', 'provider_name',
+                 'customer_profile_image', 'provider_profile_image', 'booking',
+                 'last_message', 'unread_count', 'last_message_at', 'created_at']
+        read_only_fields = ['created_at', 'last_message_at']
+
+    def get_last_message(self, obj):
+        last_msg = obj.messages.last()
+        if last_msg:
+            return MessageSerializer(last_msg).data
+        return None
+
+    def get_unread_count(self, obj):
+        user = self.context.get('request').user
+        return obj.messages.exclude(sender=user).filter(is_read=False).count()
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = ['id', 'user', 'notification_type', 'title', 'message',
+                 'booking', 'is_read', 'created_at']
+        read_only_fields = ['user', 'created_at']
+
+
+class NotificationPreferenceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NotificationPreference
+        fields = ['id', 'user', 'email_notifications', 'sms_notifications',
+                 'push_notifications', 'booking_updates', 'payment_updates',
+                 'new_messages', 'marketing_emails', 'created_at', 'updated_at']
+        read_only_fields = ['user', 'created_at', 'updated_at']

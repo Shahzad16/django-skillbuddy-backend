@@ -8,14 +8,16 @@ from datetime import timedelta
 from math import radians, cos, sin, asin, sqrt
 from .models import (
     ServiceCategory, ProviderProfile, Service, Booking, Review,
-    Payment, Installment, UserCredits, Address
+    Payment, Installment, UserCredits, Address, Conversation, Message,
+    Notification, NotificationPreference
 )
 from .serializers import (
     ServiceCategorySerializer, ProviderProfileSerializer,
     ServiceListSerializer, ServiceDetailSerializer, ServiceCreateUpdateSerializer,
     BookingSerializer, ReviewSerializer, ProviderDashboardSerializer,
     PaymentSerializer, PaymentProcessSerializer, UserCreditsSerializer,
-    UserCreditsBalanceSerializer, AddressSerializer
+    UserCreditsBalanceSerializer, AddressSerializer, ConversationSerializer,
+    MessageSerializer, NotificationSerializer, NotificationPreferenceSerializer
 )
 
 
@@ -195,6 +197,63 @@ class ReviewListCreateView(generics.ListCreateAPIView):
             queryset = queryset.filter(provider_id=provider_id)
 
         return queryset
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def create_booking_review_view(request, booking_id):
+    """Create a review for a completed booking"""
+    try:
+        booking = Booking.objects.get(id=booking_id, customer=request.user)
+
+        # Check if booking is completed
+        if booking.status != 'completed':
+            return Response({'error': 'Can only review completed bookings'},
+                          status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if review already exists
+        if hasattr(booking, 'review'):
+            return Response({'error': 'Booking already reviewed'},
+                          status=status.HTTP_400_BAD_REQUEST)
+
+        # Create review
+        rating = request.data.get('rating')
+        comment = request.data.get('comment', '')
+
+        if not rating or not (1 <= int(rating) <= 5):
+            return Response({'error': 'Rating must be between 1 and 5'},
+                          status=status.HTTP_400_BAD_REQUEST)
+
+        review = Review.objects.create(
+            booking=booking,
+            service=booking.service,
+            customer=booking.customer,
+            provider=booking.provider,
+            rating=rating,
+            comment=comment
+        )
+
+        # Update provider rating
+        provider_profile = booking.provider.provider_profile
+        provider_profile.update_rating()
+
+        # Update service average rating (implicit through property)
+
+        # Create notification for provider
+        Notification.objects.create(
+            user=booking.provider,
+            notification_type='review',
+            title='New Review',
+            message=f'{booking.customer.name} left a {rating}-star review',
+            booking=booking
+        )
+
+        serializer = ReviewSerializer(review)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    except Booking.DoesNotExist:
+        return Response({'error': 'Booking not found'},
+                       status=status.HTTP_404_NOT_FOUND)
 
 
 @api_view(['GET'])
@@ -810,4 +869,200 @@ def refund_payment_view(request):
 
     except Payment.DoesNotExist:
         return Response({'error': 'Payment not found'},
+                       status=status.HTTP_404_NOT_FOUND)
+
+
+# Chat & Messaging Views
+class ConversationListCreateView(generics.ListCreateAPIView):
+    serializer_class = ConversationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        return Conversation.objects.filter(
+            Q(customer=user) | Q(provider=user)
+        ).distinct()
+
+    def perform_create(self, serializer):
+        # Determine customer and provider based on current user
+        booking_id = self.request.data.get('booking')
+        if booking_id:
+            booking = Booking.objects.get(id=booking_id)
+            serializer.save(
+                customer=booking.customer,
+                provider=booking.provider,
+                booking=booking
+            )
+
+
+class ConversationDetailView(generics.RetrieveAPIView):
+    serializer_class = ConversationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        return Conversation.objects.filter(
+            Q(customer=user) | Q(provider=user)
+        )
+
+
+class MessageListCreateView(generics.ListCreateAPIView):
+    serializer_class = MessageSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        conversation_id = self.request.query_params.get('conversation_id')
+        if conversation_id:
+            return Message.objects.filter(
+                conversation_id=conversation_id,
+                conversation__in=Conversation.objects.filter(
+                    Q(customer=self.request.user) | Q(provider=self.request.user)
+                )
+            )
+        return Message.objects.none()
+
+    def perform_create(self, serializer):
+        message = serializer.save(sender=self.request.user)
+
+        # Update conversation last_message_at
+        conversation = message.conversation
+        conversation.last_message_at = timezone.now()
+        conversation.save()
+
+        # Create notification for the recipient
+        recipient = conversation.provider if message.sender == conversation.customer else conversation.customer
+        Notification.objects.create(
+            user=recipient,
+            notification_type='message',
+            title='New Message',
+            message=f'You have a new message from {message.sender.name}',
+            booking=conversation.booking
+        )
+
+
+@api_view(['PUT'])
+@permission_classes([permissions.IsAuthenticated])
+def mark_messages_read_view(request, conversation_id):
+    """Mark all messages in a conversation as read"""
+    try:
+        conversation = Conversation.objects.filter(
+            Q(customer=request.user) | Q(provider=request.user),
+            id=conversation_id
+        ).first()
+
+        if not conversation:
+            return Response({'error': 'Conversation not found'},
+                          status=status.HTTP_404_NOT_FOUND)
+
+        # Mark all messages from other user as read
+        Message.objects.filter(
+            conversation=conversation
+        ).exclude(sender=request.user).update(is_read=True)
+
+        return Response({'message': 'Messages marked as read'})
+
+    except Exception as e:
+        return Response({'error': str(e)},
+                       status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# Notification Views
+class NotificationListView(generics.ListAPIView):
+    serializer_class = NotificationSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        notification_type = self.request.query_params.get('type')
+        unread_only = self.request.query_params.get('unread_only', 'false').lower() == 'true'
+
+        queryset = Notification.objects.filter(user=user)
+
+        if notification_type:
+            queryset = queryset.filter(notification_type=notification_type)
+        if unread_only:
+            queryset = queryset.filter(is_read=False)
+
+        return queryset
+
+
+@api_view(['PUT'])
+@permission_classes([permissions.IsAuthenticated])
+def mark_notification_read_view(request, notification_id):
+    """Mark a notification as read"""
+    try:
+        notification = Notification.objects.get(id=notification_id, user=request.user)
+        notification.is_read = True
+        notification.save()
+        return Response({'message': 'Notification marked as read'})
+    except Notification.DoesNotExist:
+        return Response({'error': 'Notification not found'},
+                       status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['PUT'])
+@permission_classes([permissions.IsAuthenticated])
+def mark_all_notifications_read_view(request):
+    """Mark all notifications as read"""
+    Notification.objects.filter(user=request.user, is_read=False).update(is_read=True)
+    return Response({'message': 'All notifications marked as read'})
+
+
+@api_view(['DELETE'])
+@permission_classes([permissions.IsAuthenticated])
+def delete_notification_view(request, notification_id):
+    """Delete a notification"""
+    try:
+        notification = Notification.objects.get(id=notification_id, user=request.user)
+        notification.delete()
+        return Response({'message': 'Notification deleted'})
+    except Notification.DoesNotExist:
+        return Response({'error': 'Notification not found'},
+                       status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def notification_count_view(request):
+    """Get count of unread notifications"""
+    unread_count = Notification.objects.filter(user=request.user, is_read=False).count()
+    return Response({'unread_count': unread_count})
+
+
+class NotificationPreferenceView(generics.RetrieveUpdateAPIView):
+    serializer_class = NotificationPreferenceSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self):
+        preference, created = NotificationPreference.objects.get_or_create(
+            user=self.request.user
+        )
+        return preference
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def send_notification_view(request):
+    """Send a notification to a user (admin/system use)"""
+    user_id = request.data.get('user_id')
+    notification_type = request.data.get('notification_type')
+    title = request.data.get('title')
+    message = request.data.get('message')
+
+    if not all([user_id, notification_type, title, message]):
+        return Response({'error': 'Missing required fields'},
+                       status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(id=user_id)
+        notification = Notification.objects.create(
+            user=user,
+            notification_type=notification_type,
+            title=title,
+            message=message
+        )
+        serializer = NotificationSerializer(notification)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    except User.DoesNotExist:
+        return Response({'error': 'User not found'},
                        status=status.HTTP_404_NOT_FOUND)
