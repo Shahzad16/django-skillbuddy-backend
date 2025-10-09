@@ -2,7 +2,8 @@ from django.contrib import admin
 from unfold.admin import ModelAdmin
 from .models import (
     ServiceCategory, ProviderProfile, Service, ServiceImage,
-    Booking, Review, Payment, Installment, UserCredits, Address
+    Booking, Review, Payment, Installment, UserCredits, Address,
+    Conversation, Message, Notification, NotificationPreference
 )
 
 
@@ -168,6 +169,103 @@ class AddressAdmin(ModelAdmin):
                    'is_default', 'created_at')
     list_filter = ('address_type', 'is_default', 'country', 'created_at')
     search_fields = ('user__name', 'user__email', 'street_address', 'city', 'postal_code')
+    ordering = ('-created_at',)
+    readonly_fields = ('created_at', 'updated_at')
+
+    def user_name(self, obj):
+        return obj.user.name or obj.user.username
+    user_name.short_description = 'User'
+
+
+class MessageInline(admin.TabularInline):
+    model = Message
+    extra = 0
+    readonly_fields = ('sender', 'created_at')
+    fields = ('sender', 'content', 'is_read', 'created_at')
+    can_delete = False
+
+
+@admin.register(Conversation)
+class ConversationAdmin(ModelAdmin):
+    list_display = ('id', 'customer_name', 'provider_name', 'booking_id',
+                   'message_count', 'last_message_at', 'created_at')
+    list_filter = ('created_at', 'last_message_at')
+    search_fields = ('customer__name', 'provider__name', 'booking__id')
+    ordering = ('-last_message_at',)
+    readonly_fields = ('created_at', 'updated_at', 'last_message_at')
+    inlines = [MessageInline]
+
+    def customer_name(self, obj):
+        return obj.customer.name or obj.customer.username
+    customer_name.short_description = 'Customer'
+
+    def provider_name(self, obj):
+        return obj.provider.name or obj.provider.username
+    provider_name.short_description = 'Provider'
+
+    def booking_id(self, obj):
+        return f"#{obj.booking.id}" if obj.booking else "N/A"
+    booking_id.short_description = 'Booking'
+
+    def message_count(self, obj):
+        return obj.messages.count()
+    message_count.short_description = 'Messages'
+
+
+@admin.register(Message)
+class MessageAdmin(ModelAdmin):
+    list_display = ('id', 'conversation_id', 'sender_name', 'content_preview',
+                   'is_read', 'created_at')
+    list_filter = ('is_read', 'created_at')
+    search_fields = ('sender__name', 'content', 'conversation__id')
+    ordering = ('-created_at',)
+    readonly_fields = ('created_at',)
+
+    def conversation_id(self, obj):
+        return f"Conversation #{obj.conversation.id}"
+    conversation_id.short_description = 'Conversation'
+
+    def sender_name(self, obj):
+        return obj.sender.name or obj.sender.username
+    sender_name.short_description = 'Sender'
+
+    def content_preview(self, obj):
+        return obj.content[:50] + '...' if len(obj.content) > 50 else obj.content
+    content_preview.short_description = 'Content'
+
+
+@admin.register(Notification)
+class NotificationAdmin(ModelAdmin):
+    list_display = ('id', 'user_name', 'notification_type', 'title',
+                   'is_read', 'created_at')
+    list_filter = ('notification_type', 'is_read', 'created_at')
+    search_fields = ('user__name', 'user__email', 'title', 'message')
+    ordering = ('-created_at',)
+    readonly_fields = ('created_at',)
+
+    def user_name(self, obj):
+        return obj.user.name or obj.user.username
+    user_name.short_description = 'User'
+
+    actions = ['mark_as_read', 'mark_as_unread']
+
+    def mark_as_read(self, request, queryset):
+        queryset.update(is_read=True)
+    mark_as_read.short_description = "Mark selected notifications as read"
+
+    def mark_as_unread(self, request, queryset):
+        queryset.update(is_read=False)
+    mark_as_unread.short_description = "Mark selected notifications as unread"
+
+
+@admin.register(NotificationPreference)
+class NotificationPreferenceAdmin(ModelAdmin):
+    list_display = ('user_name', 'email_notifications', 'sms_notifications',
+                   'push_notifications', 'booking_updates', 'payment_updates',
+                   'new_messages', 'created_at')
+    list_filter = ('email_notifications', 'sms_notifications', 'push_notifications',
+                  'booking_updates', 'payment_updates', 'new_messages')
+    search_fields = ('user__name', 'user__email')
     ordering = ('-created_at',)
     readonly_fields = ('created_at', 'updated_at')
 
