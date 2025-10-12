@@ -22,9 +22,22 @@ boto3==1.35.16
 # Payment Processing
 stripe==10.8.0
 
+# Push Notifications (Firebase Cloud Messaging)
+firebase-admin>=6.2.0
+
 # Real-time Communication
 channels==4.1.0
 channels-redis==4.2.0
+
+# Admin Panel
+django-unfold>=0.31.0
+
+# Filtering
+django-filter==24.3
+
+# Phone Number Validation
+django-phonenumber-field==8.0.0
+phonenumbers==8.13.47
 
 # Development Tools
 django-extensions==3.2.3

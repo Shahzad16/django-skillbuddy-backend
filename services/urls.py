@@ -1,5 +1,5 @@
 from django.urls import path
-from . import views
+from . import views, stripe_views, fcm_views
 
 urlpatterns = [
     # Service Categories
@@ -70,4 +70,29 @@ urlpatterns = [
     path('notifications/count/', views.notification_count_view, name='notification-count'),
     path('notifications/preferences/', views.NotificationPreferenceView.as_view(), name='notification-preferences'),
     path('notifications/send/', views.send_notification_view, name='send-notification'),
+
+    # Stripe Payment Integration
+    path('stripe/config/', stripe_views.get_stripe_publishable_key, name='stripe-config'),
+    path('stripe/payment-intent/create/', stripe_views.create_payment_intent, name='stripe-create-payment-intent'),
+    path('stripe/payment-intent/confirm/', stripe_views.confirm_payment, name='stripe-confirm-payment'),
+    path('stripe/payment-intent/<str:payment_intent_id>/status/', stripe_views.get_payment_status, name='stripe-payment-status'),
+    path('stripe/refund/', stripe_views.create_refund, name='stripe-refund'),
+    path('stripe/setup-intent/', stripe_views.create_setup_intent, name='stripe-setup-intent'),
+    path('stripe/payment-methods/', stripe_views.list_payment_methods, name='stripe-list-payment-methods'),
+    path('stripe/payment-methods/attach/', stripe_views.attach_payment_method, name='stripe-attach-payment-method'),
+    path('stripe/payment-methods/detach/', stripe_views.detach_payment_method, name='stripe-detach-payment-method'),
+    path('stripe/webhook/', stripe_views.stripe_webhook, name='stripe-webhook'),
+
+    # FCM Push Notifications
+    path('fcm/config/', fcm_views.get_fcm_config, name='fcm-config'),
+    path('fcm/register/', fcm_views.FCMDeviceRegisterView.as_view(), name='fcm-register'),
+    path('fcm/devices/', fcm_views.FCMDeviceListView.as_view(), name='fcm-devices-list'),
+    path('fcm/devices/<int:device_id>/', fcm_views.update_device_token, name='fcm-device-update'),
+    path('fcm/devices/<int:device_id>/delete/', fcm_views.unregister_device, name='fcm-device-delete'),
+    path('fcm/devices/<int:device_id>/toggle/', fcm_views.toggle_device_status, name='fcm-device-toggle'),
+    path('fcm/test/', fcm_views.send_test_notification, name='fcm-test'),
+    path('fcm/send/', fcm_views.send_notification_to_user, name='fcm-send'),
+    path('fcm/topic/send/', fcm_views.send_topic_notification, name='fcm-topic-send'),
+    path('fcm/topic/subscribe/', fcm_views.subscribe_to_topic, name='fcm-topic-subscribe'),
+    path('fcm/topic/unsubscribe/', fcm_views.unsubscribe_from_topic, name='fcm-topic-unsubscribe'),
 ]

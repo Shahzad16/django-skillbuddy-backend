@@ -3,7 +3,7 @@ from unfold.admin import ModelAdmin
 from .models import (
     ServiceCategory, ProviderProfile, Service, ServiceImage,
     Booking, Review, Payment, Installment, UserCredits, Address,
-    Conversation, Message, Notification, NotificationPreference
+    Conversation, Message, Notification, NotificationPreference, FCMDevice
 )
 
 
@@ -272,3 +272,31 @@ class NotificationPreferenceAdmin(ModelAdmin):
     def user_name(self, obj):
         return obj.user.name or obj.user.username
     user_name.short_description = 'User'
+
+
+@admin.register(FCMDevice)
+class FCMDeviceAdmin(ModelAdmin):
+    list_display = ('id', 'user_name', 'device_type', 'device_name', 'is_active',
+                   'token_preview', 'last_used', 'created_at')
+    list_filter = ('device_type', 'is_active', 'created_at', 'last_used')
+    search_fields = ('user__name', 'user__email', 'device_token', 'device_name')
+    ordering = ('-last_used',)
+    readonly_fields = ('created_at', 'updated_at', 'last_used')
+
+    def user_name(self, obj):
+        return obj.user.name or obj.user.username
+    user_name.short_description = 'User'
+
+    def token_preview(self, obj):
+        return f"{obj.device_token[:30]}..." if len(obj.device_token) > 30 else obj.device_token
+    token_preview.short_description = 'Token'
+
+    actions = ['activate_devices', 'deactivate_devices']
+
+    def activate_devices(self, request, queryset):
+        queryset.update(is_active=True)
+    activate_devices.short_description = "Activate selected devices"
+
+    def deactivate_devices(self, request, queryset):
+        queryset.update(is_active=False)
+    deactivate_devices.short_description = "Deactivate selected devices"

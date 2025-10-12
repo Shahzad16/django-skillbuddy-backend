@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from .models import (
     ServiceCategory, ProviderProfile, Service, ServiceImage,
     Booking, Review, Payment, Installment, UserCredits, Address,
-    Conversation, Message, Notification, NotificationPreference
+    Conversation, Message, Notification, NotificationPreference, FCMDevice
 )
 
 User = get_user_model()
@@ -329,3 +329,27 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
                  'push_notifications', 'booking_updates', 'payment_updates',
                  'new_messages', 'marketing_emails', 'created_at', 'updated_at']
         read_only_fields = ['user', 'created_at', 'updated_at']
+
+
+class FCMDeviceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FCMDevice
+        fields = ['id', 'user', 'device_token', 'device_type', 'device_name',
+                 'is_active', 'created_at', 'updated_at', 'last_used']
+        read_only_fields = ['user', 'created_at', 'updated_at', 'last_used']
+
+    def create(self, validated_data):
+        # Get or update existing device token
+        device_token = validated_data.get('device_token')
+        user = validated_data.get('user')
+
+        device, created = FCMDevice.objects.update_or_create(
+            device_token=device_token,
+            defaults={
+                'user': user,
+                'device_type': validated_data.get('device_type'),
+                'device_name': validated_data.get('device_name', ''),
+                'is_active': True
+            }
+        )
+        return device

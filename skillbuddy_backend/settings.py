@@ -229,6 +229,18 @@ EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 
+# Stripe Configuration
+STRIPE_SECRET_KEY = config('STRIPE_SECRET_KEY', default='')
+STRIPE_PUBLISHABLE_KEY = config('STRIPE_PUBLISHABLE_KEY', default='')
+STRIPE_WEBHOOK_SECRET = config('STRIPE_WEBHOOK_SECRET', default='')
+STRIPE_CURRENCY = config('STRIPE_CURRENCY', default='usd')
+STRIPE_API_VERSION = '2023-10-16'
+
+# Firebase Cloud Messaging (FCM) Configuration
+FCM_SERVER_KEY = config('FCM_SERVER_KEY', default='')
+FCM_SENDER_ID = config('FCM_SENDER_ID', default='')
+FIREBASE_CREDENTIALS_PATH = config('FIREBASE_CREDENTIALS_PATH', default='')  # Path to service account JSON
+
 # Media Files
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'

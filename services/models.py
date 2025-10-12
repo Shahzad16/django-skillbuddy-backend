@@ -337,3 +337,29 @@ class NotificationPreference(models.Model):
 
     def __str__(self):
         return f"Notification preferences for {self.user.name}"
+
+
+class FCMDevice(models.Model):
+    """FCM device tokens for push notifications"""
+    DEVICE_TYPE = [
+        ('android', 'Android'),
+        ('ios', 'iOS'),
+        ('web', 'Web'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='fcm_devices')
+    device_token = models.CharField(max_length=255, unique=True)
+    device_type = models.CharField(max_length=20, choices=DEVICE_TYPE)
+    device_name = models.CharField(max_length=100, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    last_used = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-last_used']
+        verbose_name = 'FCM Device'
+        verbose_name_plural = 'FCM Devices'
+
+    def __str__(self):
+        return f"{self.user.name} - {self.device_type} ({self.device_token[:20]}...)"
