@@ -1,0 +1,74 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches:
+      - stagging
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Deploy to EC2
+        env:
+          PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          HOST: ${{ secrets.EC2_HOST }}
+          USER: ${{ secrets.EC2_USER }}
+        run: |
+          # Create SSH directory
+          mkdir -p ~/.ssh
+
+          # Add SSH key
+          echo "$PRIVATE_KEY" > ~/.ssh/deploy_key.pem
+          chmod 600 ~/.ssh/deploy_key.pem
+
+          # Add EC2 to known hosts
+          ssh-keyscan -H $HOST >> ~/.ssh/known_hosts
+
+          # Execute deployment commands on EC2
+          ssh -i ~/.ssh/deploy_key.pem -o StrictHostKeyChecking=no $USER@$HOST << 'ENDSSH'
+            set -e
+
+            echo "📦 Navigating to project directory..."
+            cd ~/django-skillbuddy-backend
+
+            echo "🔄 Pulling latest code from stagging branch..."
+            git pull origin stagging
+
+            echo "🐍 Activating virtual environment..."
+            source venv/bin/activate
+
+            echo "📥 Installing/updating dependencies..."
+            pip install -r requirements.txt
+
+            echo "🗄️ Running database migrations..."
+            python manage.py migrate --noinput
+
+            echo "📁 Collecting static files..."
+            python manage.py collectstatic --noinput
+
+            echo "🔄 Restarting Gunicorn service..."
+            sudo systemctl restart gunicorn
+
+            echo "✅ Checking service status..."
+            sudo systemctl is-active gunicorn
+
+            echo "🎉 Deployment completed successfully!"
+          ENDSSH
+
+      - name: Deployment status
+        if: success()
+        run: |
+          echo "✅ Staging deployment completed successfully!"
+          echo "🌐 Application URL: http://13.49.246.226"
+          echo "🔧 Admin Panel: http://13.49.246.226/admin/"
+          echo "📚 API Docs: http://13.49.246.226/api/docs/"
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed! Please check the logs."
