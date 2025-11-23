@@ -1,10 +1,10 @@
 from rest_framework import status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.utils import timezone
 from datetime import timedelta
+from skillbuddy_backend.utils import success_response, error_response
 from .models import User, EmailVerificationToken, PhoneVerificationToken, PasswordResetToken
 from .serializers import (
     UserRegistrationSerializer,
@@ -29,12 +29,15 @@ class UserRegistrationView(generics.CreateAPIView):
         user = serializer.save()
 
         refresh = RefreshToken.for_user(user)
-        return Response({
-            'user': UserProfileSerializer(user).data,
-            'refresh': str(refresh),
-            'access': str(refresh.access_token),
-            'message': 'User registered successfully'
-        }, status=status.HTTP_201_CREATED)
+        return success_response(
+            message='User registered successfully',
+            data={
+                'user': UserProfileSerializer(user).data,
+                'refresh': str(refresh),
+                'access': str(refresh.access_token),
+            },
+            status_code=status.HTTP_201_CREATED
+        )
 
 
 @api_view(['POST'])
@@ -46,12 +49,14 @@ def login_view(request):
     user = serializer.validated_data['user']
     refresh = RefreshToken.for_user(user)
 
-    return Response({
-        'user': UserProfileSerializer(user).data,
-        'refresh': str(refresh),
-        'access': str(refresh.access_token),
-        'message': 'Login successful'
-    })
+    return success_response(
+        message='Login successful',
+        data={
+            'user': UserProfileSerializer(user).data,
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+        }
+    )
 
 
 @api_view(['POST'])
@@ -60,9 +65,13 @@ def logout_view(request):
         refresh_token = request.data["refresh"]
         token = RefreshToken(refresh_token)
         token.blacklist()
-        return Response({'message': 'Logout successful'}, status=status.HTTP_200_OK)
-    except Exception as e:
-        return Response({'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
+        return success_response(message='Logout successful')
+    except Exception:
+        return error_response(
+            message='Invalid token',
+            errors={'refresh': ['Invalid or expired refresh token']},
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
 
 
 class UserProfileView(generics.RetrieveUpdateAPIView):
@@ -85,14 +94,17 @@ class PasswordChangeView(generics.GenericAPIView):
         user.set_password(serializer.validated_data['new_password'])
         user.save()
 
-        return Response({'message': 'Password changed successfully'})
+        return success_response(message='Password changed successfully')
 
 
 @api_view(['GET'])
 def user_list_view(request):
     users = User.objects.all()
     serializer = UserProfileSerializer(users, many=True)
-    return Response(serializer.data)
+    return success_response(
+        message='Users retrieved successfully',
+        data=serializer.data
+    )
 
 
 @api_view(['POST'])
@@ -100,7 +112,11 @@ def user_list_view(request):
 def send_email_verification(request):
     user = request.user
     if user.is_email_verified:
-        return Response({'message': 'Email already verified'}, status=status.HTTP_400_BAD_REQUEST)
+        return error_response(
+            message='Email already verified',
+            errors={'email': ['Email is already verified']},
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
 
     # Delete existing token
     EmailVerificationToken.objects.filter(user=user).delete()
@@ -115,10 +131,10 @@ def send_email_verification(request):
 
     # TODO: Send email with token
     # For now, return the token in response (remove in production)
-    return Response({
-        'message': 'Verification email sent',
-        'token': token.token  # Remove this in production
-    })
+    return success_response(
+        message='Verification email sent',
+        data={'token': token.token}  # Remove this in production
+    )
 
 
 @api_view(['POST'])
@@ -131,18 +147,30 @@ def verify_email(request):
     try:
         token = EmailVerificationToken.objects.get(user=user)
         if token.is_expired():
-            return Response({'error': 'Token expired'}, status=status.HTTP_400_BAD_REQUEST)
+            return error_response(
+                message='Token expired',
+                errors={'token': ['Verification token has expired. Please request a new one.']},
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
 
         if token.token != serializer.validated_data['token']:
-            return Response({'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
+            return error_response(
+                message='Invalid token',
+                errors={'token': ['Invalid verification token']},
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
 
         user.is_email_verified = True
         user.save()
         token.delete()
 
-        return Response({'message': 'Email verified successfully'})
+        return success_response(message='Email verified successfully')
     except EmailVerificationToken.DoesNotExist:
-        return Response({'error': 'No verification token found'}, status=status.HTTP_400_BAD_REQUEST)
+        return error_response(
+            message='No verification token found',
+            errors={'token': ['No verification token found. Please request a new one.']},
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
 
 
 @api_view(['POST'])
@@ -150,10 +178,18 @@ def verify_email(request):
 def send_phone_verification(request):
     user = request.user
     if not user.phone_number:
-        return Response({'error': 'No phone number provided'}, status=status.HTTP_400_BAD_REQUEST)
+        return error_response(
+            message='No phone number provided',
+            errors={'phone_number': ['Please add a phone number to your profile first']},
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
 
     if user.is_phone_verified:
-        return Response({'message': 'Phone already verified'}, status=status.HTTP_400_BAD_REQUEST)
+        return error_response(
+            message='Phone already verified',
+            errors={'phone_number': ['Phone number is already verified']},
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
 
     # Delete existing token
     PhoneVerificationToken.objects.filter(user=user).delete()
@@ -168,10 +204,10 @@ def send_phone_verification(request):
 
     # TODO: Send SMS with token
     # For now, return the token in response (remove in production)
-    return Response({
-        'message': 'Verification SMS sent',
-        'token': token.token  # Remove this in production
-    })
+    return success_response(
+        message='Verification SMS sent',
+        data={'token': token.token}  # Remove this in production
+    )
 
 
 @api_view(['POST'])
@@ -184,18 +220,30 @@ def verify_phone(request):
     try:
         token = PhoneVerificationToken.objects.get(user=user)
         if token.is_expired():
-            return Response({'error': 'Token expired'}, status=status.HTTP_400_BAD_REQUEST)
+            return error_response(
+                message='Token expired',
+                errors={'token': ['Verification token has expired. Please request a new one.']},
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
 
         if token.token != serializer.validated_data['token']:
-            return Response({'error': 'Invalid token'}, status=status.HTTP_400_BAD_REQUEST)
+            return error_response(
+                message='Invalid token',
+                errors={'token': ['Invalid verification token']},
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
 
         user.is_phone_verified = True
         user.save()
         token.delete()
 
-        return Response({'message': 'Phone verified successfully'})
+        return success_response(message='Phone verified successfully')
     except PhoneVerificationToken.DoesNotExist:
-        return Response({'error': 'No verification token found'}, status=status.HTTP_400_BAD_REQUEST)
+        return error_response(
+            message='No verification token found',
+            errors={'token': ['No verification token found. Please request a new one.']},
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
 
 
 @api_view(['POST'])
@@ -220,10 +268,10 @@ def password_reset_request(request):
 
     # TODO: Send email with reset link
     # For now, return the token in response (remove in production)
-    return Response({
-        'message': 'Password reset email sent',
-        'reset_token': token.token  # Remove this in production
-    })
+    return success_response(
+        message='Password reset email sent',
+        data={'reset_token': token.token}  # Remove this in production
+    )
 
 
 @api_view(['POST'])
@@ -239,7 +287,11 @@ def password_reset_confirm(request):
         )
 
         if token.is_expired():
-            return Response({'error': 'Token expired'}, status=status.HTTP_400_BAD_REQUEST)
+            return error_response(
+                message='Token expired',
+                errors={'token': ['Password reset token has expired. Please request a new one.']},
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
 
         user = token.user
         user.set_password(serializer.validated_data['new_password'])
@@ -248,6 +300,10 @@ def password_reset_confirm(request):
         token.is_used = True
         token.save()
 
-        return Response({'message': 'Password reset successfully'})
+        return success_response(message='Password reset successfully')
     except PasswordResetToken.DoesNotExist:
-        return Response({'error': 'Invalid or expired token'}, status=status.HTTP_400_BAD_REQUEST)
+        return error_response(
+            message='Invalid or expired token',
+            errors={'token': ['Invalid or expired password reset token']},
+            status_code=status.HTTP_400_BAD_REQUEST
+        )

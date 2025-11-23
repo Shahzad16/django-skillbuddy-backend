@@ -160,6 +160,12 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+
+    # Custom exception handler for standardized error responses
+    'EXCEPTION_HANDLER': 'skillbuddy_backend.exceptions.custom_exception_handler',
+
+    # Consistent key for non-field errors
+    'NON_FIELD_ERRORS_KEY': 'non_field_errors',
 }
 
 # JWT Settings

@@ -1,11 +1,11 @@
 from rest_framework import generics, status, permissions, filters
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Sum, Count, Avg
 from django.utils import timezone
 from datetime import timedelta
 from math import radians, cos, sin, asin, sqrt
+from skillbuddy_backend.utils import success_response, error_response, paginated_response
 from .models import (
     ServiceCategory, ProviderProfile, Service, Booking, Review,
     Payment, Installment, UserCredits, Address, Conversation, Message,
@@ -118,14 +118,25 @@ def become_provider_view(request):
     """Register user as a service provider"""
     try:
         profile = ProviderProfile.objects.get(user=request.user)
-        return Response({'message': 'User is already a provider'},
-                       status=status.HTTP_400_BAD_REQUEST)
+        return error_response(
+            message='User is already a provider',
+            errors={'non_field_errors': ['You are already registered as a provider']},
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
     except ProviderProfile.DoesNotExist:
         serializer = ProviderProfileSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save(user=request.user)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return success_response(
+                message='Provider registration successful',
+                data=serializer.data,
+                status_code=status.HTTP_201_CREATED
+            )
+        return error_response(
+            message='Validation failed',
+            errors=serializer.errors,
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
 
 
 class BookingListCreateView(generics.ListCreateAPIView):
@@ -161,8 +172,11 @@ def update_booking_status_view(request, booking_id):
         new_status = request.data.get('status')
 
         if new_status not in dict(Booking.BOOKING_STATUS):
-            return Response({'error': 'Invalid status'},
-                          status=status.HTTP_400_BAD_REQUEST)
+            return error_response(
+                message='Invalid status',
+                errors={'status': ['Invalid booking status provided']},
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
 
         booking.status = new_status
         booking.save()
@@ -175,11 +189,17 @@ def update_booking_status_view(request, booking_id):
             profile.save()
 
         serializer = BookingSerializer(booking)
-        return Response(serializer.data)
+        return success_response(
+            message='Booking status updated successfully',
+            data=serializer.data
+        )
 
     except Booking.DoesNotExist:
-        return Response({'error': 'Booking not found'},
-                       status=status.HTTP_404_NOT_FOUND)
+        return error_response(
+            message='Booking not found',
+            errors={'booking': ['Booking not found or you do not have permission']},
+            status_code=status.HTTP_404_NOT_FOUND
+        )
 
 
 class ReviewListCreateView(generics.ListCreateAPIView):
@@ -263,10 +283,16 @@ def provider_dashboard_view(request):
     try:
         profile = request.user.provider_profile
         serializer = ProviderDashboardSerializer(profile)
-        return Response(serializer.data)
+        return success_response(
+            message='Dashboard data retrieved successfully',
+            data=serializer.data
+        )
     except ProviderProfile.DoesNotExist:
-        return Response({'error': 'Provider profile not found'},
-                       status=status.HTTP_404_NOT_FOUND)
+        return error_response(
+            message='Provider profile not found',
+            errors={'provider': ['Provider profile not found. Please register as a provider first.']},
+            status_code=status.HTTP_404_NOT_FOUND
+        )
 
 
 @api_view(['PUT'])
@@ -277,8 +303,11 @@ def reschedule_booking_view(request, booking_id):
         booking = Booking.objects.get(id=booking_id, customer=request.user)
 
         if booking.status not in ['pending', 'confirmed']:
-            return Response({'error': 'Cannot reschedule booking in current status'},
-                          status=status.HTTP_400_BAD_REQUEST)
+            return error_response(
+                message='Cannot reschedule booking in current status',
+                errors={'status': [f'Cannot reschedule booking with status: {booking.status}']},
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
 
         scheduled_date = request.data.get('scheduled_date')
         scheduled_time = request.data.get('scheduled_time')
@@ -290,11 +319,17 @@ def reschedule_booking_view(request, booking_id):
 
         booking.save()
         serializer = BookingSerializer(booking)
-        return Response(serializer.data)
+        return success_response(
+            message='Booking rescheduled successfully',
+            data=serializer.data
+        )
 
     except Booking.DoesNotExist:
-        return Response({'error': 'Booking not found'},
-                       status=status.HTTP_404_NOT_FOUND)
+        return error_response(
+            message='Booking not found',
+            errors={'booking': ['Booking not found']},
+            status_code=status.HTTP_404_NOT_FOUND
+        )
 
 
 @api_view(['PUT'])
@@ -308,12 +343,18 @@ def cancel_booking_view(request, booking_id):
         ).first()
 
         if not booking:
-            return Response({'error': 'Booking not found'},
-                          status=status.HTTP_404_NOT_FOUND)
+            return error_response(
+                message='Booking not found',
+                errors={'booking': ['Booking not found or you do not have permission']},
+                status_code=status.HTTP_404_NOT_FOUND
+            )
 
         if booking.status in ['completed', 'cancelled']:
-            return Response({'error': 'Cannot cancel booking in current status'},
-                          status=status.HTTP_400_BAD_REQUEST)
+            return error_response(
+                message='Cannot cancel booking in current status',
+                errors={'status': [f'Cannot cancel booking with status: {booking.status}']},
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
 
         booking.status = 'cancelled'
         booking.save()
@@ -334,11 +375,17 @@ def cancel_booking_view(request, booking_id):
             )
 
         serializer = BookingSerializer(booking)
-        return Response(serializer.data)
+        return success_response(
+            message='Booking cancelled successfully',
+            data=serializer.data
+        )
 
     except Exception as e:
-        return Response({'error': str(e)},
-                       status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return error_response(
+            message='Failed to cancel booking',
+            errors={'non_field_errors': ['An unexpected error occurred']},
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 
 @api_view(['PUT'])
@@ -349,18 +396,27 @@ def accept_job_view(request, booking_id):
         booking = Booking.objects.get(id=booking_id, provider=request.user)
 
         if booking.status != 'pending':
-            return Response({'error': 'Job request is not pending'},
-                          status=status.HTTP_400_BAD_REQUEST)
+            return error_response(
+                message='Job request is not pending',
+                errors={'status': ['Can only accept pending job requests']},
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
 
         booking.status = 'confirmed'
         booking.save()
 
         serializer = BookingSerializer(booking)
-        return Response(serializer.data)
+        return success_response(
+            message='Job request accepted successfully',
+            data=serializer.data
+        )
 
     except Booking.DoesNotExist:
-        return Response({'error': 'Job request not found'},
-                       status=status.HTTP_404_NOT_FOUND)
+        return error_response(
+            message='Job request not found',
+            errors={'booking': ['Job request not found']},
+            status_code=status.HTTP_404_NOT_FOUND
+        )
 
 
 @api_view(['PUT'])
@@ -371,18 +427,27 @@ def decline_job_view(request, booking_id):
         booking = Booking.objects.get(id=booking_id, provider=request.user)
 
         if booking.status != 'pending':
-            return Response({'error': 'Job request is not pending'},
-                          status=status.HTTP_400_BAD_REQUEST)
+            return error_response(
+                message='Job request is not pending',
+                errors={'status': ['Can only decline pending job requests']},
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
 
         booking.status = 'cancelled'
         booking.save()
 
         serializer = BookingSerializer(booking)
-        return Response(serializer.data)
+        return success_response(
+            message='Job request declined successfully',
+            data=serializer.data
+        )
 
     except Booking.DoesNotExist:
-        return Response({'error': 'Job request not found'},
-                       status=status.HTTP_404_NOT_FOUND)
+        return error_response(
+            message='Job request not found',
+            errors={'booking': ['Job request not found']},
+            status_code=status.HTTP_404_NOT_FOUND
+        )
 
 
 @api_view(['GET'])
@@ -407,7 +472,11 @@ def process_payment_view(request):
     serializer = PaymentProcessSerializer(data=request.data)
 
     if not serializer.is_valid():
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return error_response(
+            message='Validation failed',
+            errors=serializer.errors,
+            status_code=status.HTTP_400_BAD_REQUEST
+        )
 
     data = serializer.validated_data
 
@@ -415,8 +484,11 @@ def process_payment_view(request):
         booking = Booking.objects.get(id=data['booking_id'], customer=request.user)
 
         if booking.is_paid:
-            return Response({'error': 'Booking is already paid'},
-                          status=status.HTTP_400_BAD_REQUEST)
+            return error_response(
+                message='Booking is already paid',
+                errors={'booking': ['This booking has already been paid']},
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
 
         # Handle credits payment
         if data['payment_method'] == 'credits':
@@ -425,8 +497,11 @@ def process_payment_view(request):
             )['total'] or 0
 
             if user_balance < booking.service.credits_required:
-                return Response({'error': 'Insufficient credits'},
-                              status=status.HTTP_400_BAD_REQUEST)
+                return error_response(
+                    message='Insufficient credits',
+                    errors={'credits': [f'Insufficient credits. Required: {booking.service.credits_required}, Available: {user_balance}']},
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
 
             # Deduct credits
             UserCredits.objects.create(
@@ -492,11 +567,18 @@ def process_payment_view(request):
                 booking.save()
 
         response_serializer = PaymentSerializer(payment)
-        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+        return success_response(
+            message='Payment processed successfully',
+            data=response_serializer.data,
+            status_code=status.HTTP_201_CREATED
+        )
 
     except Booking.DoesNotExist:
-        return Response({'error': 'Booking not found'},
-                       status=status.HTTP_404_NOT_FOUND)
+        return error_response(
+            message='Booking not found',
+            errors={'booking': ['Booking not found']},
+            status_code=status.HTTP_404_NOT_FOUND
+        )
 
 
 class PaymentListView(generics.ListAPIView):
